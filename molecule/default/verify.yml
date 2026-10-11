@@ -22,13 +22,21 @@
           - not opencode_verify_files.results[2].stat.exists
         fail_msg: "Default install assertions failed"
 
-    - name: Fetch OpenCode release metadata
+    - name: Set npm registry package for this architecture
+      ansible.builtin.set_fact:
+        opencode_verify_package: >-
+          @opencode%2fcli-{{ 'linux-x64' if ansible_facts.architecture == 'x86_64' else 'linux-arm64' }}
+
+    - name: Fetch latest version from the npm registry
       ansible.builtin.uri:
-        url: https://opencode.ai/update/api/latest/cli/opencode
+        url: "https://registry.npmjs.org/{{ opencode_verify_package }}/latest"
         return_content: true
-      register: opencode_verify_release
+      register: opencode_verify_npm_latest
       changed_when: false
       check_mode: false
+      until: opencode_verify_npm_latest.status | default(500) == 200
+      retries: 3
+      delay: 5
 
     - name: Read installed version stamp
       ansible.builtin.slurp:
@@ -37,10 +45,10 @@
 
     - name: Assert version stamp matches the latest release
       ansible.builtin.assert:
-        that: opencode_verify_stamp.content | b64decode | trim == opencode_verify_release.json.version
+        that: opencode_verify_stamp.content | b64decode | trim == opencode_verify_npm_latest.json.version
         fail_msg: >-
           Stamp is {{ opencode_verify_stamp.content | b64decode | trim }},
-          expected {{ opencode_verify_release.json.version }}
+          expected {{ opencode_verify_npm_latest.json.version }}
 
     - name: Get installed latest binary version
       ansible.builtin.command: /root/.opencode/bin/opencode --version
@@ -51,7 +59,7 @@
       ansible.builtin.assert:
         that: >-
           (opencode_verify_version.stdout | trim).split(' ')[-1] | regex_replace('^v', '')
-          == opencode_verify_release.json.version
+          == opencode_verify_npm_latest.json.version
         fail_msg: "Binary reports {{ opencode_verify_version.stdout | trim }}"
 
     - name: Check pinned-release install contents
@@ -95,19 +103,6 @@
           - opencode_verify_fallback_files.results[0].stat.mode == '0755'
           - opencode_verify_fallback_files.results[1].stat.exists
         fail_msg: "Fallback install assertions failed"
-
-    - name: Set npm registry package for this architecture
-      ansible.builtin.set_fact:
-        opencode_verify_package: >-
-          @opencode%2fcli-{{ 'linux-x64' if ansible_facts.architecture == 'x86_64' else 'linux-arm64' }}
-
-    - name: Fetch latest version from the npm registry
-      ansible.builtin.uri:
-        url: "https://registry.npmjs.org/{{ opencode_verify_package }}/latest"
-        return_content: true
-      register: opencode_verify_npm_latest
-      changed_when: false
-      check_mode: false
 
     - name: Read fallback version stamp
       ansible.builtin.slurp:
