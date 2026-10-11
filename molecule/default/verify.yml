@@ -80,6 +80,59 @@
         that: (opencode_verify_pinned_version.stdout | trim).split(' ')[-1] | regex_replace('^v', '') == '2.0.20'
         fail_msg: "Pinned binary reports {{ opencode_verify_pinned_version.stdout | trim }}"
 
+    - name: Check npm-registry fallback install contents
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: opencode_verify_fallback_files
+      loop:
+        - /opt/opencode-fallback/bin/opencode
+        - /opt/opencode-fallback/bin/.version
+
+    - name: Assert fallback binary and stamp exist
+      ansible.builtin.assert:
+        that:
+          - opencode_verify_fallback_files.results[0].stat.exists
+          - opencode_verify_fallback_files.results[0].stat.mode == '0755'
+          - opencode_verify_fallback_files.results[1].stat.exists
+        fail_msg: "Fallback install assertions failed"
+
+    - name: Set npm registry package for this architecture
+      ansible.builtin.set_fact:
+        opencode_verify_package: >-
+          @opencode%2fcli-{{ 'linux-x64' if ansible_facts.architecture == 'x86_64' else 'linux-arm64' }}
+
+    - name: Fetch latest version from the npm registry
+      ansible.builtin.uri:
+        url: "https://registry.npmjs.org/{{ opencode_verify_package }}/latest"
+        return_content: true
+      register: opencode_verify_npm_latest
+      changed_when: false
+      check_mode: false
+
+    - name: Read fallback version stamp
+      ansible.builtin.slurp:
+        src: /opt/opencode-fallback/bin/.version
+      register: opencode_verify_fallback_stamp
+
+    - name: Assert fallback stamp matches npm registry latest
+      ansible.builtin.assert:
+        that: opencode_verify_fallback_stamp.content | b64decode | trim == opencode_verify_npm_latest.json.version
+        fail_msg: >-
+          Fallback stamp is {{ opencode_verify_fallback_stamp.content | b64decode | trim }},
+          expected {{ opencode_verify_npm_latest.json.version }}
+
+    - name: Get installed fallback binary version
+      ansible.builtin.command: /opt/opencode-fallback/bin/opencode --version
+      register: opencode_verify_fallback_version
+      changed_when: false
+
+    - name: Assert fallback binary reports npm registry latest
+      ansible.builtin.assert:
+        that: >-
+          (opencode_verify_fallback_version.stdout | trim).split(' ')[-1] | regex_replace('^v', '')
+          == opencode_verify_npm_latest.json.version
+        fail_msg: "Fallback binary reports {{ opencode_verify_fallback_version.stdout | trim }}"
+
     - name: Check shell config files were not modified
       ansible.builtin.command: grep -rl "opencode/bin" /root/.bashrc /root/.profile /etc/profile /etc/bash.bashrc
       register: opencode_verify_shell_configs

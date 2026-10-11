@@ -25,33 +25,57 @@
          and opencode_cpuinfo.content | b64decode is not search("\\bavx2\\b")
          else opencode_arch_map[ansible_facts.architecture] }}
 
-- name: Fetch OpenCode release metadata
-  ansible.builtin.uri:
-    url: "{{ opencode_update_api_url }}"
-    return_content: true
-  register: opencode_release
-  changed_when: false
-  check_mode: false
-
-- name: Resolve version to install
+- name: Set package file fact
   ansible.builtin.set_fact:
-    opencode_version_resolved: >-
-      {{ opencode_version | regex_replace('^v', '')
-         if opencode_version | length > 0
-         else opencode_release.json.version }}
     opencode_package_file: "opencode-{{ opencode_target }}.tar.gz"
-
-- name: Set download facts for the latest version
-  ansible.builtin.set_fact:
-    opencode_download_url: "{{ opencode_release.json.metadata.files[opencode_package_file].url }}"
-    opencode_download_checksum: "sha256:{{ opencode_release.json.metadata.files[opencode_package_file].sha256 }}"
-  when: opencode_version_resolved == opencode_release.json.version
 
 - name: Set download facts for a pinned version
   ansible.builtin.set_fact:
-    opencode_download_url: "{{ opencode_files_base_url }}/{{ opencode_version_resolved }}/{{ opencode_package_file }}"
+    opencode_version_resolved: "{{ opencode_version | regex_replace('^v', '') }}"
+    opencode_download_url: >-
+      {{ opencode_files_base_url }}/{{ opencode_version | regex_replace('^v', '') }}/{{ opencode_package_file }}
     opencode_download_checksum: ""
-  when: opencode_version_resolved != opencode_release.json.version
+    opencode_binary_relpath: "opencode"
+  when: opencode_version | length > 0
+
+- name: Resolve latest release through the update API
+  when: opencode_version | length == 0
+  block:
+    - name: Fetch OpenCode release metadata
+      ansible.builtin.uri:
+        url: "{{ opencode_update_api_url }}"
+        return_content: true
+      register: opencode_release
+      changed_when: false
+      check_mode: false
+      until: opencode_release.status | default(500) == 200
+      retries: 3
+      delay: 5
+
+    - name: Set download facts from the update API
+      ansible.builtin.set_fact:
+        opencode_version_resolved: "{{ opencode_release.json.version }}"
+        opencode_download_url: "{{ opencode_release.json.metadata.files[opencode_package_file].url }}"
+        opencode_download_checksum: "sha256:{{ opencode_release.json.metadata.files[opencode_package_file].sha256 }}"
+        opencode_binary_relpath: "opencode"
+  rescue:
+    - name: Fall back to the npm registry for the latest release
+      ansible.builtin.uri:
+        url: "{{ opencode_npm_registry_url }}/{{ opencode_npm_scope }}%2fcli-{{ opencode_target }}/latest"
+        return_content: true
+      register: opencode_npm_release
+      changed_when: false
+      check_mode: false
+      until: opencode_npm_release.status | default(500) == 200
+      retries: 3
+      delay: 5
+
+    - name: Set download facts from the npm registry fallback
+      ansible.builtin.set_fact:
+        opencode_version_resolved: "{{ opencode_npm_release.json.version }}"
+        opencode_download_url: "{{ opencode_npm_release.json.dist.tarball }}"
+        opencode_download_checksum: "sha1:{{ opencode_npm_release.json.dist.shasum }}"
+        opencode_binary_relpath: "package/bin/opencode"
 
 - name: Ensure installation directory exists
   ansible.builtin.file:
@@ -106,7 +130,7 @@
 
     - name: Install OpenCode binary
       ansible.builtin.copy:
-        src: "{{ opencode_tmp.path }}/opencode"
+        src: "{{ opencode_tmp.path }}/{{ opencode_binary_relpath }}"
         dest: "{{ opencode_install_dir }}/opencode"
         owner: "{{ opencode_user }}"
         mode: "0755"

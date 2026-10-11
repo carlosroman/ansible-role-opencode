@@ -9,6 +9,8 @@ the official installer (`https://opencode.ai/v2/install`):
 * Optionally pins a specific version.
 * Never modifies shell config files (equivalent of `--no-modify-path`).
 * Uses the `linux-x64-baseline` build automatically on CPUs without AVX2.
+* Falls back to the npm registry (like the official installer does) when the
+  update API fails while installing the latest version.
 
 Make sure `~/.opencode/bin` is on `PATH` yourself if needed.
 

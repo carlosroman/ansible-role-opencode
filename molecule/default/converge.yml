@@ -19,3 +19,10 @@
       vars:
         opencode_version: "2.0.20"
         opencode_install_dir: /opt/opencode-pinned/bin
+
+    - name: Install latest OpenCode via the npm registry fallback (broken update API)
+      ansible.builtin.include_role:
+        name: carlosroman.opencode
+      vars:
+        opencode_update_api_url: http://127.0.0.1:1/update/api/latest/cli/opencode
+        opencode_install_dir: /opt/opencode-fallback/bin

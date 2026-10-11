@@ -3,6 +3,11 @@
 opencode_update_api_url: https://opencode.ai/update/api/latest/cli/opencode
 opencode_files_base_url: https://opencode.ai/files/bin
 
+# npm registry used to install the latest release when the update API fails,
+# mirroring the download method of the official install script.
+opencode_npm_registry_url: https://registry.npmjs.org
+opencode_npm_scope: "@opencode"
+
 opencode_arch_map:
   x86_64: linux-x64
   aarch64: linux-arm64
