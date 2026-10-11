@@ -1,3 +1,12 @@
 #SPDX-License-Identifier: MIT-0
 ---
-# defaults file for role
+# Version of OpenCode to install. Empty string means the latest release.
+opencode_version: ""
+
+# User to install OpenCode for. The tilde in opencode_install_dir
+# expands to this user's home directory.
+opencode_user: root
+
+# Installation directory. Must match the directory used by the official
+# installer ($HOME/.opencode/bin) so the built-in self-updater keeps working.
+opencode_install_dir: ~/.opencode/bin

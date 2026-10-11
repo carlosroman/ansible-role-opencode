@@ -1,6 +1,7 @@
 #SPDX-License-Identifier: MIT-0
 ---
-
-- name: Task is only run when Debian OS
-  ansible.builtin.debug:
-    msg: "This is a task for Debian OS from my_role."
+- name: Install required packages
+  ansible.builtin.package:
+    name:
+      - tar
+    state: present

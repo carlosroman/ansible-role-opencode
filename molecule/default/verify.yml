@@ -1,0 +1,92 @@
+#SPDX-License-Identifier: MIT-0
+---
+- name: Verify
+  hosts: all
+
+  tasks:
+    - name: Check latest-release install directory contents
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: opencode_verify_files
+      loop:
+        - /root/.opencode/bin/opencode
+        - /root/.opencode/bin/.version
+        - /root/.opencode/bin/opencode2
+
+    - name: Assert latest-release binary and stamp exist (and no opencode2 shim)
+      ansible.builtin.assert:
+        that:
+          - opencode_verify_files.results[0].stat.exists
+          - opencode_verify_files.results[0].stat.mode == '0755'
+          - opencode_verify_files.results[1].stat.exists
+          - not opencode_verify_files.results[2].stat.exists
+        fail_msg: "Default install assertions failed"
+
+    - name: Fetch OpenCode release metadata
+      ansible.builtin.uri:
+        url: https://opencode.ai/update/api/latest/cli/opencode
+        return_content: true
+      register: opencode_verify_release
+      changed_when: false
+      check_mode: false
+
+    - name: Read installed version stamp
+      ansible.builtin.slurp:
+        src: /root/.opencode/bin/.version
+      register: opencode_verify_stamp
+
+    - name: Assert version stamp matches the latest release
+      ansible.builtin.assert:
+        that: opencode_verify_stamp.content | b64decode | trim == opencode_verify_release.json.version
+        fail_msg: >-
+          Stamp is {{ opencode_verify_stamp.content | b64decode | trim }},
+          expected {{ opencode_verify_release.json.version }}
+
+    - name: Get installed latest binary version
+      ansible.builtin.command: /root/.opencode/bin/opencode --version
+      register: opencode_verify_version
+      changed_when: false
+
+    - name: Assert binary reports the latest version
+      ansible.builtin.assert:
+        that: >-
+          (opencode_verify_version.stdout | trim).split(' ')[-1] | regex_replace('^v', '')
+          == opencode_verify_release.json.version
+        fail_msg: "Binary reports {{ opencode_verify_version.stdout | trim }}"
+
+    - name: Check pinned-release install contents
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: opencode_verify_pinned_files
+      loop:
+        - /opt/opencode-pinned/bin/opencode
+        - /opt/opencode-pinned/bin/.version
+
+    - name: Assert pinned binary and stamp exist
+      ansible.builtin.assert:
+        that:
+          - opencode_verify_pinned_files.results[0].stat.exists
+          - opencode_verify_pinned_files.results[0].stat.mode == '0755'
+          - opencode_verify_pinned_files.results[1].stat.exists
+        fail_msg: "Pinned install assertions failed"
+
+    - name: Get installed pinned binary version
+      ansible.builtin.command: /opt/opencode-pinned/bin/opencode --version
+      register: opencode_verify_pinned_version
+      changed_when: false
+
+    - name: Assert pinned binary reports 2.0.20
+      ansible.builtin.assert:
+        that: (opencode_verify_pinned_version.stdout | trim).split(' ')[-1] | regex_replace('^v', '') == '2.0.20'
+        fail_msg: "Pinned binary reports {{ opencode_verify_pinned_version.stdout | trim }}"
+
+    - name: Check shell config files were not modified
+      ansible.builtin.command: grep -rl "opencode/bin" /root/.bashrc /root/.profile /etc/profile /etc/bash.bashrc
+      register: opencode_verify_shell_configs
+      changed_when: false
+      failed_when: opencode_verify_shell_configs.rc not in [0, 1, 2]
+
+    - name: Assert no shell config file references the install dir
+      ansible.builtin.assert:
+        that: opencode_verify_shell_configs.stdout | length == 0
+        fail_msg: "A shell config file was modified: {{ opencode_verify_shell_configs.stdout }}"

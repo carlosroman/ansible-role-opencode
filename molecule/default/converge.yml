@@ -5,14 +5,17 @@
 
   pre_tasks:
     - name: Update apt cache.
-      apt: update_cache=true cache_valid_time=600
+      ansible.builtin.apt: update_cache=true cache_valid_time=600
       changed_when: false
       when: ansible_os_family == 'Debian'
 
   roles:
-    - role: carlosroman.base_role
+    - role: carlosroman.opencode
 
-  post_tasks:
-    - name: Verify
-      ansible.builtin.debug:
-        msg: "Add your verification tasks here."
+  tasks:
+    - name: Install a pinned OpenCode version into a custom directory
+      ansible.builtin.include_role:
+        name: carlosroman.opencode
+      vars:
+        opencode_version: "2.0.20"
+        opencode_install_dir: /opt/opencode-pinned/bin

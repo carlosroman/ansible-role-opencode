@@ -1,3 +1,8 @@
 #SPDX-License-Identifier: MIT-0
 ---
-# vars file for role
+opencode_update_api_url: https://opencode.ai/update/api/latest/cli/opencode
+opencode_files_base_url: https://opencode.ai/files/bin
+
+opencode_arch_map:
+  x86_64: linux-x64
+  aarch64: linux-arm64

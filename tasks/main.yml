@@ -1,8 +1,125 @@
 #SPDX-License-Identifier: MIT-0
 ---
-- name: Run setup tasks
+- name: Run OS-family-specific setup tasks
   ansible.builtin.include_tasks: setup-{{ ansible_facts.os_family }}.yml
 
-- name: Task is running from within the role
-  ansible.builtin.debug:
-    msg: "This is a task from my_role."
+- name: Assert supported architecture
+  ansible.builtin.assert:
+    that: ansible_facts.architecture in opencode_arch_map
+    fail_msg: "Unsupported architecture: {{ ansible_facts.architecture }}"
+    success_msg: "Supported architecture: {{ ansible_facts.architecture }}"
+
+- name: Read CPU info
+  ansible.builtin.slurp:
+    src: /proc/cpuinfo
+  register: opencode_cpuinfo
+  changed_when: false
+  check_mode: false
+  when: ansible_facts.architecture == 'x86_64'
+
+- name: Set installation target fact
+  ansible.builtin.set_fact:
+    opencode_target: >-
+      {{ 'linux-x64-baseline'
+         if ansible_facts.architecture == 'x86_64'
+         and opencode_cpuinfo.content | b64decode is not search("\\bavx2\\b")
+         else opencode_arch_map[ansible_facts.architecture] }}
+
+- name: Fetch OpenCode release metadata
+  ansible.builtin.uri:
+    url: "{{ opencode_update_api_url }}"
+    return_content: true
+  register: opencode_release
+  changed_when: false
+  check_mode: false
+
+- name: Resolve version to install
+  ansible.builtin.set_fact:
+    opencode_version_resolved: >-
+      {{ opencode_version | regex_replace('^v', '')
+         if opencode_version | length > 0
+         else opencode_release.json.version }}
+    opencode_package_file: "opencode-{{ opencode_target }}.tar.gz"
+
+- name: Set download facts for the latest version
+  ansible.builtin.set_fact:
+    opencode_download_url: "{{ opencode_release.json.metadata.files[opencode_package_file].url }}"
+    opencode_download_checksum: "sha256:{{ opencode_release.json.metadata.files[opencode_package_file].sha256 }}"
+  when: opencode_version_resolved == opencode_release.json.version
+
+- name: Set download facts for a pinned version
+  ansible.builtin.set_fact:
+    opencode_download_url: "{{ opencode_files_base_url }}/{{ opencode_version_resolved }}/{{ opencode_package_file }}"
+    opencode_download_checksum: ""
+  when: opencode_version_resolved != opencode_release.json.version
+
+- name: Ensure installation directory exists
+  ansible.builtin.file:
+    path: "{{ opencode_install_dir }}"
+    state: directory
+    owner: "{{ opencode_user }}"
+    mode: "0755"
+
+- name: Check for an installed version stamp
+  ansible.builtin.stat:
+    path: "{{ opencode_install_dir }}/.version"
+  register: opencode_stamp
+  changed_when: false
+  check_mode: false
+
+- name: Read installed version stamp
+  ansible.builtin.slurp:
+    src: "{{ opencode_install_dir }}/.version"
+  register: opencode_stamp_content
+  changed_when: false
+  check_mode: false
+  when: opencode_stamp.stat.exists
+
+- name: Determine whether installation is required
+  ansible.builtin.set_fact:
+    opencode_needs_install: >-
+      {{ not opencode_stamp.stat.exists
+         or (opencode_stamp_content.content | default('') | b64decode | trim) != opencode_version_resolved }}
+
+- name: Install OpenCode
+  when:
+    - opencode_needs_install | bool
+    - not ansible_check_mode
+  block:
+    - name: Create temporary directory
+      ansible.builtin.tempfile:
+        state: directory
+      register: opencode_tmp
+
+    - name: Download OpenCode tarball
+      ansible.builtin.get_url:
+        url: "{{ opencode_download_url }}"
+        dest: "{{ opencode_tmp.path }}/{{ opencode_package_file }}"
+        checksum: "{{ opencode_download_checksum | default(omit, true) }}"
+        mode: "0600"
+
+    - name: Extract OpenCode tarball
+      ansible.builtin.unarchive:
+        src: "{{ opencode_tmp.path }}/{{ opencode_package_file }}"
+        dest: "{{ opencode_tmp.path }}"
+        remote_src: true
+
+    - name: Install OpenCode binary
+      ansible.builtin.copy:
+        src: "{{ opencode_tmp.path }}/opencode"
+        dest: "{{ opencode_install_dir }}/opencode"
+        owner: "{{ opencode_user }}"
+        mode: "0755"
+        remote_src: true
+
+    - name: Write version stamp
+      ansible.builtin.copy:
+        content: "{{ opencode_version_resolved }}\n"
+        dest: "{{ opencode_install_dir }}/.version"
+        owner: "{{ opencode_user }}"
+        mode: "0644"
+
+    - name: Remove temporary directory
+      ansible.builtin.file:
+        path: "{{ opencode_tmp.path }}"
+        state: absent
